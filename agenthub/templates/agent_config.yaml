@@ -1,0 +1,38 @@
+name: my-agent
+description: Description of what this agent does
+category: general
+version: 1.0.0
+tags:
+  - example
+  - utility
+pricing:
+  type: per_request
+  price: 0.01
+  currency: USD
+author: Your Name
+license: MIT
+documentation_url: ""
+repository_url: ""
+endpoints:
+  - path: /process
+    method: POST
+    description: Process data
+    parameters:
+      input:
+        type: string
+        required: true
+        description: Input data to process
+  - path: /status
+    method: GET
+    description: Get agent status
+capabilities:
+  - name: data_processing
+    description: Process various types of data
+    parameters:
+      format:
+        type: string
+        enum: [json, xml, csv]
+        default: json
+requirements:
+  - python>=3.8
+  - requests>=2.28.0
