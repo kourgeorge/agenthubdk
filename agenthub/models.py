@@ -224,6 +224,9 @@ else:
         """Complete agent metadata"""
         
         def __init__(self, **kwargs):
+            # Remove pricing from kwargs before calling super() to prevent overwrite
+            pricing_data = kwargs.pop('pricing', None)
+            
             self.name = kwargs.get('name', '')
             self.description = kwargs.get('description', '')
             self.version = kwargs.get('version', '1.0.0')
@@ -231,7 +234,6 @@ else:
             self.tags = kwargs.get('tags', [])
             self.capabilities = kwargs.get('capabilities', [])
             self.endpoints = kwargs.get('endpoints', [])
-            self.pricing = kwargs.get('pricing')
             self.protocol = kwargs.get('protocol', AgentProtocol.ACP)
             self.runtime = kwargs.get('runtime', AgentRuntime.EXTERNAL)
             self.endpoint_url = kwargs.get('endpoint_url', None)
@@ -242,8 +244,10 @@ else:
             self.repository_url = kwargs.get('repository_url', None)
             
             # Convert pricing to PricingModel if it's a dict
-            if isinstance(self.pricing, dict):
-                self.pricing = PricingModel(**self.pricing)
+            if pricing_data is not None and isinstance(pricing_data, dict):
+                self.pricing = PricingModel(**pricing_data)
+            else:
+                self.pricing = pricing_data
             
             # Convert string enums
             if isinstance(self.protocol, str):
