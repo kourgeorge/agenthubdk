@@ -1,10 +1,44 @@
 """
-Pydantic models for AgentHub SDK
+Pydantic models for AgentHub SDK with fallback support
 """
 
 from typing import Dict, Any, Optional, List, Union
-from pydantic import BaseModel, Field, validator
 from enum import Enum
+
+# Try to import Pydantic, fall back to standard Python if not available
+try:
+    from pydantic import BaseModel, Field, validator
+    PYDANTIC_AVAILABLE = True
+except ImportError:
+    PYDANTIC_AVAILABLE = False
+    
+    # Fallback BaseModel implementation
+    class BaseModel:
+        """Fallback BaseModel for when Pydantic is not available"""
+        def __init__(self, **kwargs):
+            for key, value in kwargs.items():
+                setattr(self, key, value)
+        
+        def dict(self):
+            """Convert to dictionary"""
+            return {k: v for k, v in self.__dict__.items() if not k.startswith('_')}
+        
+        def json(self):
+            """Convert to JSON string"""
+            import json
+            return json.dumps(self.dict())
+    
+    # Fallback Field function
+    def Field(default=None, **kwargs):
+        """Fallback Field function"""
+        return default
+    
+    # Fallback validator decorator
+    def validator(field_name):
+        """Fallback validator decorator"""
+        def decorator(func):
+            return func
+        return decorator
 
 
 class PricingType(str, Enum):
@@ -31,106 +65,177 @@ class AgentRuntime(str, Enum):
 
 class PricingModel(BaseModel):
     """Pricing configuration for an agent"""
-    type: PricingType = Field(..., description="The pricing model type")
-    price: float = Field(..., ge=0, description="Price per unit")
-    currency: str = Field(default="USD", description="Currency code")
     
-    @validator('price')
-    def validate_price(cls, v):
-        if v < 0:
+    def __init__(self, **kwargs):
+        self.type = kwargs.get('type', PricingType.PER_REQUEST)
+        self.price = kwargs.get('price', 0.0)
+        self.currency = kwargs.get('currency', 'USD')
+        
+        # Convert string to enum if needed
+        if isinstance(self.type, str):
+            self.type = PricingType(self.type)
+        
+        # Validate price
+        if self.price < 0:
             raise ValueError("Price must be non-negative")
-        return v
+        
+        super().__init__(**kwargs)
 
 
 class AgentCapability(BaseModel):
     """Individual agent capability description"""
-    name: str = Field(..., description="Capability name")
-    description: str = Field(..., description="Capability description")
-    parameters: Dict[str, Any] = Field(default_factory=dict, description="Expected parameters")
+    
+    def __init__(self, **kwargs):
+        self.name = kwargs.get('name', '')
+        self.description = kwargs.get('description', '')
+        self.parameters = kwargs.get('parameters', {})
+        super().__init__(**kwargs)
 
 
 class AgentEndpoint(BaseModel):
     """Agent endpoint configuration"""
-    path: str = Field(..., description="Endpoint path")
-    method: str = Field(default="POST", description="HTTP method")
-    description: str = Field(..., description="Endpoint description")
-    parameters: Dict[str, Any] = Field(default_factory=dict, description="Expected parameters")
-    response_schema: Optional[Dict[str, Any]] = Field(None, description="Response schema")
+    
+    def __init__(self, **kwargs):
+        self.path = kwargs.get('path', '')
+        self.method = kwargs.get('method', 'POST')
+        self.description = kwargs.get('description', '')
+        self.parameters = kwargs.get('parameters', {})
+        self.response_schema = kwargs.get('response_schema', None)
+        super().__init__(**kwargs)
 
 
 class AgentMetadata(BaseModel):
     """Complete agent metadata"""
-    name: str = Field(..., description="Agent name")
-    description: str = Field(..., description="Agent description")
-    version: str = Field(default="1.0.0", description="Agent version")
-    category: str = Field(..., description="Agent category")
-    tags: List[str] = Field(default_factory=list, description="Agent tags")
-    capabilities: List[AgentCapability] = Field(default_factory=list, description="Agent capabilities")
-    endpoints: List[AgentEndpoint] = Field(default_factory=list, description="Agent endpoints")
-    pricing: PricingModel = Field(..., description="Pricing model")
-    protocol: AgentProtocol = Field(default=AgentProtocol.ACP, description="Communication protocol")
-    runtime: AgentRuntime = Field(default=AgentRuntime.EXTERNAL, description="Runtime environment")
-    endpoint_url: Optional[str] = Field(None, description="External endpoint URL")
-    requirements: List[str] = Field(default_factory=list, description="Runtime requirements")
-    author: Optional[str] = Field(None, description="Agent author")
-    license: Optional[str] = Field(None, description="Agent license")
-    documentation_url: Optional[str] = Field(None, description="Documentation URL")
-    repository_url: Optional[str] = Field(None, description="Repository URL")
     
-    @validator('name')
-    def validate_name(cls, v):
-        if not v or len(v.strip()) == 0:
+    def __init__(self, **kwargs):
+        self.name = kwargs.get('name', '')
+        self.description = kwargs.get('description', '')
+        self.version = kwargs.get('version', '1.0.0')
+        self.category = kwargs.get('category', 'general')
+        self.tags = kwargs.get('tags', [])
+        self.capabilities = kwargs.get('capabilities', [])
+        self.endpoints = kwargs.get('endpoints', [])
+        self.pricing = kwargs.get('pricing')
+        self.protocol = kwargs.get('protocol', AgentProtocol.ACP)
+        self.runtime = kwargs.get('runtime', AgentRuntime.EXTERNAL)
+        self.endpoint_url = kwargs.get('endpoint_url', None)
+        self.requirements = kwargs.get('requirements', [])
+        self.author = kwargs.get('author', None)
+        self.license = kwargs.get('license', None)
+        self.documentation_url = kwargs.get('documentation_url', None)
+        self.repository_url = kwargs.get('repository_url', None)
+        
+        # Convert pricing to PricingModel if it's a dict
+        if isinstance(self.pricing, dict):
+            self.pricing = PricingModel(**self.pricing)
+        
+        # Convert string enums
+        if isinstance(self.protocol, str):
+            self.protocol = AgentProtocol(self.protocol)
+        if isinstance(self.runtime, str):
+            self.runtime = AgentRuntime(self.runtime)
+        
+        # Convert capabilities list
+        capabilities_list = []
+        for cap in self.capabilities:
+            if isinstance(cap, dict):
+                capabilities_list.append(AgentCapability(**cap))
+            else:
+                capabilities_list.append(cap)
+        self.capabilities = capabilities_list
+        
+        # Convert endpoints list
+        endpoints_list = []
+        for ep in self.endpoints:
+            if isinstance(ep, dict):
+                endpoints_list.append(AgentEndpoint(**ep))
+            else:
+                endpoints_list.append(ep)
+        self.endpoints = endpoints_list
+        
+        # Validate required fields
+        if not self.name or len(self.name.strip()) == 0:
             raise ValueError("Agent name cannot be empty")
-        return v.strip()
-    
-    @validator('version')
-    def validate_version(cls, v):
-        # Basic semantic versioning validation
-        parts = v.split('.')
-        if len(parts) != 3:
-            raise ValueError("Version must be in format X.Y.Z")
-        for part in parts:
-            if not part.isdigit():
-                raise ValueError("Version parts must be numeric")
-        return v
+        
+        # Validate version format
+        if self.version:
+            parts = self.version.split('.')
+            if len(parts) != 3:
+                raise ValueError("Version must be in format X.Y.Z")
+            for part in parts:
+                if not part.isdigit():
+                    raise ValueError("Version parts must be numeric")
+        
+        super().__init__(**kwargs)
 
 
 class TaskRequest(BaseModel):
     """Task request from client to agent"""
-    agent_id: str = Field(..., description="Target agent ID")
-    endpoint: str = Field(..., description="Target endpoint")
-    parameters: Dict[str, Any] = Field(default_factory=dict, description="Task parameters")
-    callback_url: Optional[str] = Field(None, description="Callback URL for async results")
-    timeout: Optional[int] = Field(None, ge=1, description="Timeout in seconds")
-    priority: int = Field(default=0, ge=0, le=10, description="Task priority (0-10)")
+    
+    def __init__(self, **kwargs):
+        self.agent_id = kwargs.get('agent_id', '')
+        self.endpoint = kwargs.get('endpoint', '')
+        self.parameters = kwargs.get('parameters', {})
+        self.callback_url = kwargs.get('callback_url', None)
+        self.timeout = kwargs.get('timeout', None)
+        self.priority = kwargs.get('priority', 0)
+        
+        # Validate timeout
+        if self.timeout is not None and self.timeout < 1:
+            raise ValueError("Timeout must be at least 1 second")
+        
+        # Validate priority
+        if not (0 <= self.priority <= 10):
+            raise ValueError("Priority must be between 0 and 10")
+        
+        super().__init__(**kwargs)
 
 
 class TaskResponse(BaseModel):
     """Task response from agent to client"""
-    task_id: str = Field(..., description="Task ID")
-    status: str = Field(..., description="Task status")
-    result: Optional[Dict[str, Any]] = Field(None, description="Task result")
-    error: Optional[str] = Field(None, description="Error message if failed")
-    execution_time: Optional[float] = Field(None, description="Execution time in seconds")
-    cost: Optional[float] = Field(None, description="Task cost")
+    
+    def __init__(self, **kwargs):
+        self.task_id = kwargs.get('task_id', '')
+        self.status = kwargs.get('status', '')
+        self.result = kwargs.get('result', None)
+        self.error = kwargs.get('error', None)
+        self.execution_time = kwargs.get('execution_time', None)
+        self.cost = kwargs.get('cost', None)
+        super().__init__(**kwargs)
 
 
 class AgentRegistration(BaseModel):
     """Agent registration request"""
-    metadata: AgentMetadata = Field(..., description="Agent metadata")
-    api_key: str = Field(..., description="Creator API key")
     
-    class Config:
-        # Hide API key in string representation
-        repr_exclude = {"api_key"}
+    def __init__(self, **kwargs):
+        self.metadata = kwargs.get('metadata')
+        self.api_key = kwargs.get('api_key', '')
+        
+        # Convert metadata to AgentMetadata if it's a dict
+        if isinstance(self.metadata, dict):
+            self.metadata = AgentMetadata(**self.metadata)
+        
+        super().__init__(**kwargs)
 
 
 class AgentStatus(BaseModel):
     """Agent status information"""
-    agent_id: str = Field(..., description="Agent ID")
-    status: str = Field(..., description="Agent status")
-    last_seen: Optional[str] = Field(None, description="Last seen timestamp")
-    reliability_score: Optional[float] = Field(None, ge=0, le=100, description="Reliability score")
-    total_tasks: int = Field(default=0, description="Total tasks completed")
-    success_rate: Optional[float] = Field(None, ge=0, le=1, description="Success rate")
-    average_response_time: Optional[float] = Field(None, description="Average response time")
+    
+    def __init__(self, **kwargs):
+        self.agent_id = kwargs.get('agent_id', '')
+        self.status = kwargs.get('status', '')
+        self.last_seen = kwargs.get('last_seen', None)
+        self.reliability_score = kwargs.get('reliability_score', None)
+        self.total_tasks = kwargs.get('total_tasks', 0)
+        self.success_rate = kwargs.get('success_rate', None)
+        self.average_response_time = kwargs.get('average_response_time', None)
+        
+        # Validate reliability score
+        if self.reliability_score is not None and not (0 <= self.reliability_score <= 100):
+            raise ValueError("Reliability score must be between 0 and 100")
+        
+        # Validate success rate
+        if self.success_rate is not None and not (0 <= self.success_rate <= 1):
+            raise ValueError("Success rate must be between 0 and 1")
+        
+        super().__init__(**kwargs)
