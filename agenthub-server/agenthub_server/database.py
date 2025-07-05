@@ -102,6 +102,8 @@ class DatabaseManager:
                     author TEXT,
                     metadata JSON,
                     endpoint_url TEXT,
+                    agent_config JSON,
+                    deployment_type TEXT DEFAULT 'acp',
                     status TEXT DEFAULT 'active',
                     reliability_score REAL DEFAULT 100.0,
                     total_tasks INTEGER DEFAULT 0,
@@ -201,6 +203,8 @@ class DatabaseManager:
                         author TEXT,
                         metadata JSONB,
                         endpoint_url TEXT,
+                        agent_config JSONB,
+                        deployment_type TEXT DEFAULT 'acp',
                         status TEXT DEFAULT 'active',
                         reliability_score REAL DEFAULT 100.0,
                         total_tasks INTEGER DEFAULT 0,
@@ -285,13 +289,21 @@ class DatabaseManager:
                 
                 conn.commit()
     
-    def register_agent(self, agent_metadata: AgentMetadata, endpoint_url: str = None) -> str:
+    def register_agent(
+        self, 
+        agent_metadata: AgentMetadata, 
+        endpoint_url: str = None,
+        agent_config: Dict[str, Any] = None,
+        deployment_type: str = "acp"
+    ) -> str:
         """
         Register a new agent in the database
         
         Args:
             agent_metadata: Agent metadata
-            endpoint_url: Agent endpoint URL
+            endpoint_url: Agent endpoint URL (for HTTP-based agents)
+            agent_config: Agent configuration for dynamic deployment (for ACP agents)
+            deployment_type: Deployment type ('acp' or 'http')
             
         Returns:
             Agent ID
@@ -303,8 +315,9 @@ class DatabaseManager:
                 conn.execute("""
                     INSERT INTO agents (
                         id, name, description, category, version, author,
-                        metadata, endpoint_url, created_at, updated_at, last_seen
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        metadata, endpoint_url, agent_config, deployment_type,
+                        created_at, updated_at, last_seen
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     agent_id,
                     agent_metadata.name,
@@ -314,6 +327,8 @@ class DatabaseManager:
                     agent_metadata.author,
                     json.dumps(agent_metadata.dict()),
                     endpoint_url,
+                    json.dumps(agent_config) if agent_config else None,
+                    deployment_type,
                     datetime.now(),
                     datetime.now(),
                     datetime.now()
@@ -323,8 +338,8 @@ class DatabaseManager:
                     cur.execute("""
                         INSERT INTO agents (
                             id, name, description, category, version, author,
-                            metadata, endpoint_url
-                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                            metadata, endpoint_url, agent_config, deployment_type
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """, (
                         agent_id,
                         agent_metadata.name,
@@ -333,7 +348,9 @@ class DatabaseManager:
                         agent_metadata.version,
                         agent_metadata.author,
                         json.dumps(agent_metadata.dict()),
-                        endpoint_url
+                        endpoint_url,
+                        json.dumps(agent_config) if agent_config else None,
+                        deployment_type
                     ))
             
             # Register capabilities
@@ -416,6 +433,7 @@ class DatabaseManager:
             if result:
                 agent_dict = dict(result)
                 agent_dict['metadata'] = json.loads(agent_dict['metadata']) if agent_dict['metadata'] else {}
+                agent_dict['agent_config'] = json.loads(agent_dict['agent_config']) if agent_dict['agent_config'] else {}
                 return agent_dict
             return None
     
@@ -453,6 +471,7 @@ class DatabaseManager:
             for result in results:
                 agent_dict = dict(result)
                 agent_dict['metadata'] = json.loads(agent_dict['metadata']) if agent_dict['metadata'] else {}
+                agent_dict['agent_config'] = json.loads(agent_dict['agent_config']) if agent_dict['agent_config'] else {}
                 agents.append(agent_dict)
             
             return agents

@@ -23,6 +23,7 @@ from .models import (
     AgentMetadata, TaskRequest, TaskResponse, AgentStatus, 
     AgentRegistration, PricingModel, PricingType
 )
+from .acp_manager import get_acp_manager
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +54,7 @@ class AgentHubServer:
         self.database_url = database_url
         self.require_auth = require_auth
         self.db = init_database(database_url)
+        self.acp_manager = get_acp_manager()
         
         # Create FastAPI app
         self.app = FastAPI(
@@ -386,34 +388,71 @@ class AgentHubServer:
         agent_info: Dict[str, Any],
         task_request: TaskRequest
     ):
-        """Execute a task by calling the agent"""
+        """Execute a task by dynamically creating and calling an ACP agent"""
         start_time = time.time()
+        server_info = None
         
         try:
             # Update task status to running
             self.db.update_task(task_id, "running")
             
-            # Determine endpoint URL
-            endpoint_url = agent_info.get("endpoint_url")
-            if not endpoint_url:
-                # Try to find a local agent
-                if agent_info["id"] in registered_agents:
-                    local_agent = registered_agents[agent_info["id"]]
-                    endpoint_url = f"http://localhost:{local_agent.get('port', 8000)}"
-                else:
-                    raise Exception("No endpoint URL available for agent")
+            deployment_type = agent_info.get("deployment_type", "acp")
             
-            # Make HTTP request to agent
-            full_url = f"{endpoint_url.rstrip('/')}{task_request.endpoint}"
-            
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.post(
-                    full_url,
-                    json=task_request.parameters,
-                    headers={"Content-Type": "application/json"}
+            if deployment_type == "acp":
+                # Create dynamic ACP server for the agent
+                agent_config = agent_info.get("agent_config", {})
+                if not agent_config:
+                    # Create default config if none exists
+                    agent_config = {
+                        "type": "code_agent",
+                        "name": agent_info.get("name", "default_agent"),
+                        "description": agent_info.get("description", "Default agent"),
+                        "model_id": "openai/gpt-4",
+                        "tools": ["DuckDuckGoSearchTool", "VisitWebpageTool"]
+                    }
+                
+                logger.info(f"Creating ACP server for agent {agent_info['id']}")
+                server_info = await self.acp_manager.create_agent_server(
+                    agent_id=agent_info["id"],
+                    agent_config=agent_config,
+                    task_id=task_id
                 )
-                response.raise_for_status()
-                result = response.json()
+                
+                # Prepare prompt from task parameters
+                prompt = self._prepare_agent_prompt(task_request)
+                
+                # Execute task via ACP
+                logger.info(f"Executing task via ACP for agent {agent_info['id']}")
+                response = await self.acp_manager.execute_agent_task(
+                    server_info=server_info,
+                    prompt=prompt,
+                    timeout=task_request.timeout or 30
+                )
+                
+                result = {"response": response, "protocol": "acp"}
+                
+            else:
+                # Fallback to HTTP-based execution (legacy)
+                endpoint_url = agent_info.get("endpoint_url")
+                if not endpoint_url:
+                    # Try to find a local agent
+                    if agent_info["id"] in registered_agents:
+                        local_agent = registered_agents[agent_info["id"]]
+                        endpoint_url = f"http://localhost:{local_agent.get('port', 8000)}"
+                    else:
+                        raise Exception("No endpoint URL available for HTTP agent")
+                
+                # Make HTTP request to agent
+                full_url = f"{endpoint_url.rstrip('/')}{task_request.endpoint}"
+                
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    response = await client.post(
+                        full_url,
+                        json=task_request.parameters,
+                        headers={"Content-Type": "application/json"}
+                    )
+                    response.raise_for_status()
+                    result = response.json()
             
             execution_time = time.time() - start_time
             
@@ -458,6 +497,35 @@ class AgentHubServer:
             )
             
             logger.error(f"Task {task_id} failed: {error_message}")
+            
+        finally:
+            # Cleanup ACP server if it was created
+            if server_info and deployment_type == "acp":
+                try:
+                    await self.acp_manager.cleanup_server(task_id)
+                except Exception as cleanup_error:
+                    logger.error(f"Failed to cleanup server for task {task_id}: {cleanup_error}")
+    
+    def _prepare_agent_prompt(self, task_request: TaskRequest) -> str:
+        """Prepare a prompt for the agent from task parameters"""
+        # Convert task parameters to a natural language prompt
+        if isinstance(task_request.parameters, dict):
+            if "prompt" in task_request.parameters:
+                return str(task_request.parameters["prompt"])
+            elif "query" in task_request.parameters:
+                return str(task_request.parameters["query"])
+            elif "question" in task_request.parameters:
+                return str(task_request.parameters["question"])
+            elif "text" in task_request.parameters:
+                return str(task_request.parameters["text"])
+            else:
+                # Convert all parameters to a descriptive prompt
+                param_strings = []
+                for key, value in task_request.parameters.items():
+                    param_strings.append(f"{key}: {value}")
+                return f"Process the following parameters: {', '.join(param_strings)}"
+        else:
+            return str(task_request.parameters)
     
     def calculate_task_cost(self, agent_info: Dict[str, Any], execution_time: float) -> float:
         """Calculate task cost based on agent pricing"""
@@ -488,24 +556,30 @@ class AgentHubServer:
     def register_agent_endpoint(
         self, 
         agent_metadata: AgentMetadata, 
-        endpoint_url: str
+        endpoint_url: str = None,
+        agent_config: Dict[str, Any] = None,
+        deployment_type: str = "acp"
     ) -> str:
-        """Register an agent endpoint with the hub"""
+        """Register an agent with the hub"""
         try:
             # Register in database
             agent_id = self.db.register_agent(
                 agent_metadata,
-                endpoint_url=endpoint_url
+                endpoint_url=endpoint_url,
+                agent_config=agent_config,
+                deployment_type=deployment_type
             )
             
             # Keep track of registered agents
             registered_agents[agent_id] = {
                 "metadata": agent_metadata,
                 "endpoint_url": endpoint_url,
+                "agent_config": agent_config,
+                "deployment_type": deployment_type,
                 "registered_at": datetime.now()
             }
             
-            logger.info(f"Registered agent {agent_id} at {endpoint_url}")
+            logger.info(f"Registered {deployment_type} agent {agent_id}")
             return agent_id
             
         except Exception as e:

@@ -110,10 +110,11 @@ def init_db_command(database_url, force):
 @hub_cli.command("register-agent")
 @click.option("--config", required=True, help="Agent configuration file (YAML or JSON)")
 @click.option("--database-url", default="sqlite:///agenthub.db", help="Database URL")
-@click.option("--endpoint-url", help="Agent endpoint URL")
-def register_agent_command(config, database_url, endpoint_url):
+@click.option("--endpoint-url", help="Agent endpoint URL (for HTTP deployment)")
+@click.option("--deployment-type", default="acp", type=click.Choice(["acp", "http"]), help="Deployment type")
+def register_agent_command(config, database_url, endpoint_url, deployment_type):
     """Register an agent from configuration file"""
-    click.echo(f"📝 Registering agent from: {config}")
+    click.echo(f"📝 Registering {deployment_type.upper()} agent from: {config}")
     
     try:
         # Load configuration
@@ -127,17 +128,39 @@ def register_agent_command(config, database_url, endpoint_url):
             else:
                 config_data = json.load(f)
         
+        # Extract metadata and agent_config
+        metadata_data = config_data.copy()
+        agent_config = metadata_data.pop('agent_config', None)
+        
         # Create metadata
-        metadata = AgentMetadata(**config_data)
+        metadata = AgentMetadata(**metadata_data)
+        
+        # Validate deployment type requirements
+        if deployment_type == "http" and not endpoint_url:
+            raise click.ClickException("--endpoint-url is required for HTTP deployment")
+        
+        if deployment_type == "acp" and not agent_config:
+            raise click.ClickException("'agent_config' section is required in configuration file for ACP deployment")
         
         # Initialize database and register
         db = init_database(database_url)
-        agent_id = db.register_agent(metadata, endpoint_url)
+        agent_id = db.register_agent(
+            metadata, 
+            endpoint_url=endpoint_url,
+            agent_config=agent_config,
+            deployment_type=deployment_type
+        )
         
-        click.echo(f"✅ Agent registered successfully!")
+        click.echo(f"✅ {deployment_type.upper()} agent registered successfully!")
         click.echo(f"🆔 Agent ID: {agent_id}")
         click.echo(f"📛 Name: {metadata.name}")
         click.echo(f"📂 Category: {metadata.category}")
+        click.echo(f"🚀 Deployment: {deployment_type}")
+        
+        if deployment_type == "acp":
+            click.echo(f"⚙️  Agent will be dynamically spawned when tasks are requested")
+        elif endpoint_url:
+            click.echo(f"🔗 Endpoint: {endpoint_url}")
         
     except Exception as e:
         click.echo(f"❌ Failed to register agent: {e}", err=True)
@@ -167,9 +190,12 @@ def list_agents_command(database_url, category, limit):
             click.echo(f"   Category: {agent['category']}")
             click.echo(f"   Version: {agent['version']}")
             click.echo(f"   Status: {agent['status']}")
+            click.echo(f"   Deployment: {agent.get('deployment_type', 'http').upper()}")
             click.echo(f"   Tasks: {agent['total_tasks']} (success rate: {agent['success_rate']:.1%})")
             if agent['endpoint_url']:
                 click.echo(f"   Endpoint: {agent['endpoint_url']}")
+            elif agent.get('deployment_type') == 'acp':
+                click.echo(f"   Type: Dynamic ACP agent")
             click.echo()
             
     except Exception as e:
@@ -199,7 +225,11 @@ def agent_info_command(agent_id, database_url):
         click.echo(f"Version: {agent['version']}")
         click.echo(f"Author: {agent['author']}")
         click.echo(f"Status: {agent['status']}")
-        click.echo(f"Endpoint URL: {agent['endpoint_url']}")
+        click.echo(f"Deployment Type: {agent.get('deployment_type', 'http').upper()}")
+        if agent['endpoint_url']:
+            click.echo(f"Endpoint URL: {agent['endpoint_url']}")
+        elif agent.get('deployment_type') == 'acp':
+            click.echo(f"Endpoint URL: Dynamic ACP agent (spawned on demand)")
         click.echo(f"Created: {agent['created_at']}")
         click.echo(f"Last Seen: {agent['last_seen']}")
         click.echo()
@@ -208,6 +238,15 @@ def agent_info_command(agent_id, database_url):
         click.echo(f"   Success Rate: {agent['success_rate']:.1%}")
         click.echo(f"   Avg Response Time: {agent['average_response_time']:.2f}s")
         click.echo(f"   Reliability Score: {agent['reliability_score']:.1f}/100")
+        
+        # Show ACP agent config if available
+        if agent.get('agent_config') and agent.get('deployment_type') == 'acp':
+            click.echo()
+            click.echo("⚙️  ACP Configuration:")
+            agent_config = agent['agent_config']
+            if isinstance(agent_config, str):
+                agent_config = json.loads(agent_config)
+            click.echo(json.dumps(agent_config, indent=2))
         
         # Show metadata if available
         if agent.get('metadata'):
@@ -305,61 +344,114 @@ def test_connection_command(url, api_key):
 
 @hub_cli.command("example-config")
 @click.option("--output", default="example_agent.yaml", help="Output file")
-def example_config_command(output):
+@click.option("--deployment-type", default="acp", type=click.Choice(["acp", "http"]), help="Deployment type")
+def example_config_command(output, deployment_type):
     """Generate an example agent configuration file"""
-    example_config = {
-        "name": "Example Agent",
-        "description": "An example AI agent for demonstration",
-        "category": "utility",
-        "version": "1.0.0",
-        "author": "AgentHub Team",
-        "license": "MIT",
-        "tags": ["example", "demo", "utility"],
-        "pricing": {
-            "type": "per_request",
-            "price": 0.01,
-            "currency": "USD"
-        },
-        "capabilities": [
-            {
-                "name": "greeting",
-                "description": "Greet users with personalized messages",
-                "parameters": {
-                    "name": {"type": "string", "required": True}
-                }
+    
+    if deployment_type == "acp":
+        example_config = {
+            "name": "Example ACP Agent",
+            "description": "An example AI agent using ACP (Agent Communication Protocol)",
+            "category": "utility",
+            "version": "1.0.0",
+            "author": "AgentHub Team",
+            "license": "MIT",
+            "tags": ["example", "demo", "utility", "acp"],
+            "pricing": {
+                "type": "per_request",
+                "price": 0.01,
+                "currency": "USD"
             },
-            {
-                "name": "calculation",
-                "description": "Perform basic arithmetic operations",
-                "parameters": {
-                    "a": {"type": "number", "required": True},
-                    "b": {"type": "number", "required": True},
-                    "operation": {"type": "string", "enum": ["add", "subtract", "multiply", "divide"]}
+            "capabilities": [
+                {
+                    "name": "text_processing",
+                    "description": "Process and analyze text",
+                    "parameters": {
+                        "text": {"type": "string", "required": True}
+                    }
+                },
+                {
+                    "name": "question_answering",
+                    "description": "Answer questions based on provided context",
+                    "parameters": {
+                        "question": {"type": "string", "required": True},
+                        "context": {"type": "string", "required": False}
+                    }
                 }
+            ],
+            "requirements": ["acp-sdk", "smolagents", "openai"],
+            "documentation_url": "https://example.com/docs",
+            "repository_url": "https://github.com/example/agent",
+            "agent_config": {
+                "type": "code_agent",
+                "name": "example_agent",
+                "description": "Example ACP agent with search and web browsing capabilities",
+                "model_id": "openai/gpt-4",
+                "tools": ["DuckDuckGoSearchTool", "VisitWebpageTool"],
+                "system_prompt": "You are a helpful AI assistant. Use the available tools to provide accurate and helpful responses to user queries."
             }
-        ],
-        "endpoints": [
-            {
-                "path": "/greet",
-                "method": "POST",
-                "description": "Greet a user"
+        }
+    else:  # HTTP deployment
+        example_config = {
+            "name": "Example HTTP Agent",
+            "description": "An example AI agent using HTTP REST API",
+            "category": "utility",
+            "version": "1.0.0",
+            "author": "AgentHub Team",
+            "license": "MIT",
+            "tags": ["example", "demo", "utility", "http"],
+            "pricing": {
+                "type": "per_request",
+                "price": 0.01,
+                "currency": "USD"
             },
-            {
-                "path": "/calculate",
-                "method": "POST", 
-                "description": "Perform calculation"
-            }
-        ],
-        "requirements": ["fastapi", "uvicorn"],
-        "documentation_url": "https://example.com/docs",
-        "repository_url": "https://github.com/example/agent"
-    }
+            "capabilities": [
+                {
+                    "name": "greeting",
+                    "description": "Greet users with personalized messages",
+                    "parameters": {
+                        "name": {"type": "string", "required": True}
+                    }
+                },
+                {
+                    "name": "calculation",
+                    "description": "Perform basic arithmetic operations",
+                    "parameters": {
+                        "a": {"type": "number", "required": True},
+                        "b": {"type": "number", "required": True},
+                        "operation": {"type": "string", "enum": ["add", "subtract", "multiply", "divide"]}
+                    }
+                }
+            ],
+            "endpoints": [
+                {
+                    "path": "/greet",
+                    "method": "POST",
+                    "description": "Greet a user"
+                },
+                {
+                    "path": "/calculate",
+                    "method": "POST", 
+                    "description": "Perform calculation"
+                }
+            ],
+            "requirements": ["fastapi", "uvicorn"],
+            "documentation_url": "https://example.com/docs",
+            "repository_url": "https://github.com/example/agent"
+        }
     
     with open(output, 'w') as f:
         yaml.dump(example_config, f, default_flow_style=False, indent=2)
     
-    click.echo(f"✅ Example configuration saved to: {output}")
-    click.echo("📝 Edit this file and use 'agenthub register-agent --config example_agent.yaml'")
+    click.echo(f"✅ Example {deployment_type.upper()} configuration saved to: {output}")
+    click.echo(f"📝 Edit this file and use 'agenthub register-agent --config {output} --deployment-type {deployment_type}'")
+    
+    if deployment_type == "acp":
+        click.echo("⚙️  ACP agents are dynamically spawned when tasks are requested")
+        click.echo("🔧 Make sure to install: pip install acp-sdk smolagents")
+    else:
+        click.echo("🔗 HTTP agents require a running server endpoint")
+        click.echo("📡 Use --endpoint-url to specify the server URL when registering")
 
 
 if __name__ == "__main__":
