@@ -79,15 +79,21 @@ class LocalAgentRunner:
 def create_demo_agent():
     """Create a demonstration agent using actual AgentHub SDK components"""
     
-    # Create agent metadata using actual AgentHub SDK
-    metadata = AgentMetadata(
-        name="Demo Local Agent",
-        description="A demonstration agent running locally with AgentHub SDK",
-        category="demo",
-        version="1.0.0",
-        pricing=PricingModel(type="per_request", price=0.001),
-        author="AgentHub SDK Demo"
-    )
+    # Create agent metadata using kwargs approach to avoid Pydantic field validation
+    metadata_kwargs = {
+        'name': "Demo Local Agent",
+        'description': "A demonstration agent running locally with AgentHub SDK",
+        'category': "demo",
+        'version': "1.0.0",
+        'pricing': {
+            'type': "per_request",
+            'price': 0.001,
+            'currency': "USD"
+        },
+        'author': "AgentHub SDK Demo"
+    }
+    
+    metadata = AgentMetadata(**metadata_kwargs)
     
     # Create local runner
     runner = LocalAgentRunner(metadata)
