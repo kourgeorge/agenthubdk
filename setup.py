@@ -47,6 +47,18 @@ setup(
         "crewai": [
             "crewai>=0.1.0",
         ],
+        "full": [
+            # Include all optional dependencies
+            "pytest>=7.0.0",
+            "pytest-asyncio>=0.21.0",
+            "black>=22.0.0",
+            "flake8>=4.0.0",
+            "mypy>=0.950",
+            "langchain>=0.1.0",
+            "langchain-openai>=0.1.0",
+            "chromadb>=0.4.0",
+            "crewai>=0.1.0",
+        ],
     },
     entry_points={
         "console_scripts": [
