@@ -1,6 +1,6 @@
 # AgentHub Server
 
-A complete marketplace server for the AgentHub framework with database persistence, agent registry, task management, and user authentication.
+A complete marketplace server for AI agents with database persistence, agent registry, task management, and user authentication. This is a separate project from the core [AgentHub SDK](https://github.com/agenthub/python-sdk) and provides the infrastructure for running an agent marketplace.
 
 ## 🚀 Features
 
@@ -42,40 +42,40 @@ The AgentHub server consists of several key components:
 
 ```bash
 # Start development server (no authentication)
-python -m agenthub.hub_cli dev --port 8080
+python -m agenthub_server.cli dev --port 8080
 
 # Or start with authentication enabled
-python -m agenthub.hub_cli serve --port 8080 --require-auth
+python -m agenthub_server.cli serve --port 8080 --require-auth
 ```
 
 ### 2. Initialize Database
 
 ```bash
 # Initialize SQLite database
-python -m agenthub.hub_cli init-db
+python -m agenthub_server.cli init-db
 
 # Initialize PostgreSQL database
-python -m agenthub.hub_cli init-db --database-url "postgresql://user:pass@localhost/agenthub"
+python -m agenthub_server.cli init-db --database-url "postgresql://user:pass@localhost/agenthub"
 ```
 
 ### 3. Register an Agent
 
 ```bash
 # Generate example configuration
-python -m agenthub.hub_cli example-config --output my_agent.yaml
+python -m agenthub_server.cli example-config --output my_agent.yaml
 
 # Register agent from config file
-python -m agenthub.hub_cli register-agent --config my_agent.yaml
+python -m agenthub_server.cli register-agent --config my_agent.yaml
 ```
 
 ### 4. List Agents
 
 ```bash
 # List all registered agents
-python -m agenthub.hub_cli list-agents
+python -m agenthub_server.cli list-agents
 
 # Filter by category
-python -m agenthub.hub_cli list-agents --category utility
+python -m agenthub_server.cli list-agents --category utility
 ```
 
 ## 🛠️ CLI Commands
@@ -162,7 +162,7 @@ export AGENTHUB_LOG_LEVEL="info"
 ### Programmatic Configuration
 
 ```python
-from agenthub.hub_server import create_hub_server, serve_hub
+from agenthub_server import create_hub_server, serve_hub
 
 # Create server with custom configuration
 server = create_hub_server(
@@ -367,7 +367,7 @@ server = create_hub_server(require_auth=False)
 
 ```bash
 # Production server with multiple workers
-python -m agenthub.hub_cli serve \
+python -m agenthub_server.cli serve \
   --host 0.0.0.0 \
   --port 8080 \
   --workers 4 \
@@ -389,7 +389,7 @@ COPY . .
 
 EXPOSE 8080
 
-CMD ["python", "-m", "agenthub.hub_cli", "serve", \
+CMD ["python", "-m", "agenthub_server.cli", "serve", \
      "--host", "0.0.0.0", "--port", "8080"]
 ```
 
@@ -466,7 +466,7 @@ spec:
 
 ```bash
 # Run the complete demo
-python examples/agenthub_server_demo.py
+python examples/demo.py
 ```
 
 This demo will:
@@ -480,10 +480,10 @@ This demo will:
 ### Creating Custom Agents
 
 ```python
-from agenthub import AgentBuilder
-from agenthub.hub_server import create_hub_server
+from agenthub import AgentBuilder  # From the core AgentHub SDK
+from agenthub_server import create_hub_server
 
-# Create agent
+# Create agent using the core SDK
 agent = AgentBuilder("my-custom-agent")
 
 @agent.endpoint("/process", description="Process data")
@@ -501,17 +501,20 @@ agent.set_metadata({
 
 # Register with hub server
 server = create_hub_server()
-agent_id = server.register_local_agent(agent, port=8001)
+agent_id = server.register_agent_endpoint(
+    agent.metadata,
+    "http://localhost:8001"
+)
 ```
 
 ### Testing
 
 ```bash
 # Test server connection
-python -m agenthub.hub_cli test-connection --url http://localhost:8080
+python -m agenthub_server.cli test-connection --url http://localhost:8080
 
 # Test with authentication
-python -m agenthub.hub_cli test-connection \
+python -m agenthub_server.cli test-connection \
   --url http://localhost:8080 \
   --api-key ah_1234567890abcdef
 
@@ -533,7 +536,7 @@ curl -X POST http://localhost:8080/tasks \
 lsof -i :8080
 
 # Use different port
-python -m agenthub.hub_cli serve --port 8081
+python -m agenthub_server.cli serve --port 8081
 ```
 
 #### Database Connection Issues
@@ -549,7 +552,7 @@ psql postgresql://user:pass@localhost/agenthub -c "SELECT 1;"
 ```bash
 # Validate agent configuration
 python -c "
-from agenthub.models import AgentMetadata
+from agenthub_server.models import AgentMetadata
 import yaml
 with open('agent.yaml') as f:
     data = yaml.safe_load(f)
@@ -563,10 +566,10 @@ print('✅ Configuration valid')
 Enable debug logging:
 
 ```bash
-python -m agenthub.hub_cli dev --port 8080
+python -m agenthub_server.cli dev --port 8080
 # or
 export AGENTHUB_LOG_LEVEL=debug
-python -m agenthub.hub_cli serve
+python -m agenthub_server.cli serve
 ```
 
 ### Health Checks
@@ -577,7 +580,7 @@ curl http://localhost:8080/health
 
 # Check database connectivity
 python -c "
-from agenthub.database import init_database
+from agenthub_server.database import init_database
 db = init_database('sqlite:///agenthub.db')
 print('✅ Database connected')
 "
@@ -587,7 +590,7 @@ print('✅ Database connected')
 
 See the `examples/` directory for complete examples:
 
-- `agenthub_server_demo.py`: Complete marketplace demo
+- `demo.py`: Complete marketplace demo
 - Agent configuration files in YAML format
 - Integration examples with different frameworks
 

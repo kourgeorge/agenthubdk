@@ -23,7 +23,6 @@ from .models import (
     AgentMetadata, TaskRequest, TaskResponse, AgentStatus, 
     AgentRegistration, PricingModel, PricingType
 )
-from .agent_builder import AgentBuilder
 
 logger = logging.getLogger(__name__)
 
@@ -486,37 +485,31 @@ class AgentHubServer:
             logger.error(f"Error calculating cost: {e}")
             return 0.0
     
-    def register_local_agent(
+    def register_agent_endpoint(
         self, 
-        agent: AgentBuilder, 
-        port: int = 8000,
-        auto_register: bool = True
+        agent_metadata: AgentMetadata, 
+        endpoint_url: str
     ) -> str:
-        """Register a local agent with the hub"""
+        """Register an agent endpoint with the hub"""
         try:
-            # Register in database if metadata is available
-            agent_id = None
-            if agent.metadata and auto_register:
-                agent_id = self.db.register_agent(
-                    agent.metadata,
-                    endpoint_url=f"http://localhost:{port}"
-                )
-            else:
-                agent_id = agent.agent_id
+            # Register in database
+            agent_id = self.db.register_agent(
+                agent_metadata,
+                endpoint_url=endpoint_url
+            )
             
-            # Keep track of local agents
+            # Keep track of registered agents
             registered_agents[agent_id] = {
-                "agent": agent,
-                "port": port,
-                "endpoint_url": f"http://localhost:{port}",
+                "metadata": agent_metadata,
+                "endpoint_url": endpoint_url,
                 "registered_at": datetime.now()
             }
             
-            logger.info(f"Registered local agent {agent_id} on port {port}")
+            logger.info(f"Registered agent {agent_id} at {endpoint_url}")
             return agent_id
             
         except Exception as e:
-            logger.error(f"Failed to register local agent: {e}")
+            logger.error(f"Failed to register agent: {e}")
             raise
     
     def get_app(self) -> FastAPI:
